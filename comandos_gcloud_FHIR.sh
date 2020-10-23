@@ -1,0 +1,138 @@
+# ================= CONFIGURAÇÃO DO AMBIENTE =============
+# construir a imagem do ambiente
+docker build . -t gcloud-fhir
+
+# instancia um container nomeado `gcloud` com powershell interativo
+docker run -ti --name gcloud gcloud-fhir pwsh
+
+# defina as variáveis de configuração do projeto criado anteriormente na interface web
+$PROJECT_ID=<PROJECT_ID>
+$LOCATION=<LOCATION>
+$DATASET_ID=<DATASET_ID>
+$FHIR_STORE_ID=<FHIR_STORE_ID>
+$NAME="usertest"
+
+# autenticacao do gcloud
+# clique no link, copie e cole o código
+gcloud auth login
+
+# especificar o projeto que estamos utilizando
+gcloud config set project $PROJECT_ID
+
+# cria um usuário para a conta de serviço
+gcloud iam service-accounts create $NAME
+
+# vincular o usuário ao projeto com escopo de proprietário
+gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$NAME@$PROJECT_ID.iam.gserviceaccount.com --role "roles/owner"
+
+# cria localmente as chaves de autenticação
+gcloud iam service-accounts keys create CREDENTIALS.json --iam-account $NAME@$PROJECT_ID.iam.gserviceaccount.com
+$env:GOOGLE_APPLICATION_CREDENTIALS="CREDENTIALS.json"
+# ================= USO DO SERVIDOR FHIR =============
+
+# defina as variáveis de ambiente de credencias e headers para todas as requisições seguintes
+$cred = gcloud auth application-default print-access-token
+$headers = @{ Authorization = "Bearer $cred" }
+
+# crie um Patient seguindo a estrutura do recurso HL7 FHIR
+$patient = '{
+  "name": [
+    {
+      "use": "official",
+      "family": "Nusite",
+      "given": [
+        "Darcy"
+      ]
+    }
+  ],
+  "gender": "female",
+  "birthDate": "1980-01-01",
+  "resourceType": "Patient"
+}'
+
+# enviar uma solicitação POST para o servidor usando Windows PowerShell para criar um recurso de Patient
+Invoke-RestMethod `
+  -Method Post `
+  -Headers $headers `
+  -ContentType: "application/fhir+json; charset=utf-8" `
+  -Body $patient `
+  -Uri "https://healthcare.googleapis.com/v1/projects/$PROJECT_ID/locations/$LOCATION/datasets/$DATASET_ID/fhirStores/$FHIR_STORE_ID/fhir/Patient" | ConvertTo-Json
+
+# crie uma variável de ambiente para armazenar o PATIENT_ID do paciente criado (substitua `ID` no comando abaixo pelo id retornado), vamos usá-lo nos próximos exemplos
+$PATIENT_ID=<id>
+
+# o paciente procurou atendimento médico pois estava com dificuldades de respirar, vamos criar um Encounter para descrever a interação do paciente e um profissional durante o atendimento
+$encounter = '{
+  "status": "finished",
+  "class": {
+    "system": "https://www.hl7.org/fhir/R4/",
+    "code": "IMP",
+    "display": "inpatient encounter"
+  },
+  "reasonCode": [
+    {
+      "text": "A paciente relatou dificuldades de respiração."
+    }
+  ],
+  "subject": {
+    "reference": "Patient/$PATIENT_ID"
+  },
+  "resourceType": "Encounter"
+}'
+
+# substitua automaticamente o valor da variável na mensagem
+$encounter = $ExecutionContext.InvokeCommand.ExpandString($encounter)
+
+# realize o POST do encontro para o recurso Encounter
+Invoke-RestMethod `
+  -Method Post `
+  -Headers $headers `
+  -ContentType: "application/fhir+json; charset=utf-8" `
+  -Body $encounter `
+  -Uri "https://healthcare.googleapis.com/v1/projects/$PROJECT_ID/locations/$LOCATION/datasets/$DATASET_ID/fhirStores/$FHIR_STORE_ID/fhir/Encounter" | ConvertTo-Json
+
+#crie uma variável de ambiente para armazenar o ENCOUNTER_ID do encontro criado (substitua `ID` no comando abaixo pelo id retornado)
+$ENCOUNTER_ID=<id>
+
+# durante o encontro, o professional de saúde realizou a medição da taxa respiratória do paciente. Vamos criar uma Observation
+$observation = '{
+  "resourceType": "Observation",
+  "status": "final",
+  "subject": {
+    "reference": "Patient/$PATIENT_ID"
+  },
+  "effectiveDateTime": "2020-01-01T00:00:00+00:00",
+  "code": {
+    "coding": [
+      {
+        "system": "http://loinc.org",
+        "code": "9279-1",
+        "display": "Respirações"
+      }
+    ]
+  },
+  "valueQuantity": {
+    "value": 8,
+    "unit": "respirações/min"
+  },
+  "encounter": {
+    "reference": "Encounter/$ENCOUNTER_ID"
+  }
+}'
+
+# substitua automaticamente o valor da variável na mensagem
+$observation = $ExecutionContext.InvokeCommand.ExpandString($observation)
+
+# realize o POST para o recurso Observation
+Invoke-RestMethod `
+  -Method Post `
+  -Headers $headers `
+  -ContentType: "application/fhir+json; charset=utf-8" `
+  -Body $observation `
+  -Uri "https://healthcare.googleapis.com/v1/projects/$PROJECT_ID/locations/$LOCATION/datasets/$DATASET_ID/fhirStores/$FHIR_STORE_ID/fhir/Observation" | ConvertTo-Json
+
+# para realizar uma consulta basta fazer uma requisição GET para o endpoint do recurso utilizando o ID do recurso. Vamos buscar pelo paciente inserido.
+Invoke-RestMethod `
+  -Method Get `
+  -Headers $headers `
+  -Uri "https://healthcare.googleapis.com/v1/projects/$PROJECT_ID/locations/$LOCATION/datasets/$DATASET_ID/fhirStores/$FHIR_STORE_ID/fhir/Patient/$PATIENT_ID" | ConvertTo-Json
