@@ -12,7 +12,7 @@
 - Docker :whale:
 
 ## Tutorial
-Para informações detalhadas sobre os comandos consulte o PDF do trabalho :page_facing_up:. Os comandos também estão relatados no arquivo `comandos_gcloud_FHIR.sh`.
+Para informações detalhadas sobre os comandos consulte o [PDF do trabalho](https://github.com/gbnegrini/hl7-fhir-tutorial/blob/main/Tutorial.pdf) :page_facing_up:. Os comandos também estão relatados no arquivo `comandos_gcloud_FHIR.sh`.
 
 ## :books: Referências
 https://cloud.google.com/healthcare/docs/concepts/fhir
